@@ -3,9 +3,19 @@ from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Optional, Dict, Any, List
 
+try:
+    from analyzer.complexity_visualizer import ComplexityVisualizer, GraphicalResultsPanel
+    GRAPHS_AVAILABLE = True
+except ImportError:
+    # Fallback if visualization dependencies are not available
+    GRAPHS_AVAILABLE = False
+    ComplexityVisualizer = None
+    GraphicalResultsPanel = None
+
 class ResultsPanel(ttk.Notebook):
     def __init__(self, parent, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
+        self.visualizer = ComplexityVisualizer() if GRAPHS_AVAILABLE else None
         self._setup_tabs()
         
     def _setup_tabs(self):
@@ -42,6 +52,40 @@ class ResultsPanel(ttk.Notebook):
         self.metrics_text.pack(fill=tk.BOTH, expand=True)
         self.add(self.metrics_tab, text="Metrics")
         
+        # Visualization tabs (if available)
+        if GRAPHS_AVAILABLE:
+            self._setup_visualization_tabs()
+        else:
+            # Add a note about missing dependencies
+            self.graph_note_tab = ttk.Frame(self)
+            note_text = tk.Text(self.graph_note_tab, wrap=tk.WORD, font=('Arial', 11))
+            note_text.pack(fill=tk.BOTH, expand=True)
+            note_text.insert(tk.END, 
+                "Graphical visualizations are not available.\n\n"
+                "To enable graphs, install the required dependencies:\n"
+                "pip install matplotlib numpy seaborn\n\n"
+                "Then restart the application to see complexity graphs.")
+            note_text.config(state=tk.DISABLED)
+            self.add(self.graph_note_tab, text="Graphs (Unavailable)")
+            
+    def _setup_visualization_tabs(self):
+        """Setup visualization tabs when dependencies are available."""
+        # Complexity Comparison tab
+        self.comparison_tab = ttk.Frame(self)
+        self.add(self.comparison_tab, text="Complexity Charts")
+        
+        # Trend Analysis tab (for multiple files)
+        self.trend_tab = ttk.Frame(self)
+        self.add(self.trend_tab, text="Trend Analysis")
+        
+        # Distribution tab
+        self.distribution_tab = ttk.Frame(self)
+        self.add(self.distribution_tab, text="Distribution")
+        
+        # Performance Radar tab
+        self.radar_tab = ttk.Frame(self)
+        self.add(self.radar_tab, text="Performance Radar")
+        
     def preview_file(self, file_path: str):
         """Preview the content of a file."""
         try:
@@ -62,6 +106,46 @@ class ResultsPanel(ttk.Notebook):
         """Display analysis results."""
         self._display_issues(results.get('issues', {}))
         self._display_metrics(results.get('metrics', {}), results.get('language', 'unknown'))
+        
+        # Display graphical results if available
+        if GRAPHS_AVAILABLE and self.visualizer:
+            self._display_graphical_results(results)
+            
+    def _display_graphical_results(self, results: Dict[str, Any]):
+        """Display graphical visualizations for single file results."""
+        try:
+            metrics = results.get('metrics', {})
+            time_complexity = metrics.get('time_complexity', {})
+            space_complexity = metrics.get('space_complexity', {})
+            
+            # Clear existing graphs
+            self._clear_tab(self.comparison_tab)
+            self._clear_tab(self.radar_tab)
+            
+            # Create complexity comparison chart
+            if time_complexity or space_complexity:
+                comparison_fig = self.visualizer.create_complexity_comparison_chart(
+                    time_complexity, space_complexity
+                )
+                comparison_canvas = self.visualizer.create_tkinter_canvas(
+                    self.comparison_tab, comparison_fig
+                )
+                comparison_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+            # Create performance radar chart
+            radar_fig = self.visualizer.create_performance_radar_chart(metrics)
+            radar_canvas = self.visualizer.create_tkinter_canvas(
+                self.radar_tab, radar_fig
+            )
+            radar_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+        except Exception as e:
+            # If graph generation fails, show error in comparison tab
+            self._clear_tab(self.comparison_tab)
+            error_label = tk.Label(self.comparison_tab, 
+                                 text=f"Error generating graphs: {str(e)}", 
+                                 wraplength=400)
+            error_label.pack(expand=True)
         
     def display_multiple_results(self, results: List[Dict[str, Any]]):
         """Display results from multiple files."""
@@ -112,6 +196,44 @@ class ResultsPanel(ttk.Notebook):
         
         self.metrics_text.config(state=tk.DISABLED)
         self.select(self.issues_tab)
+        
+        # Display graphical results for multiple files
+        if GRAPHS_AVAILABLE and self.visualizer and results:
+            self._display_multiple_file_graphs(results)
+            
+    def _display_multiple_file_graphs(self, results: List[Dict[str, Any]]):
+        """Display graphical visualizations for multiple file results."""
+        try:
+            # Clear existing graphs
+            self._clear_tab(self.trend_tab)
+            self._clear_tab(self.distribution_tab)
+            
+            # Create trend analysis
+            trend_fig = self.visualizer.create_complexity_trend_chart(results)
+            trend_canvas = self.visualizer.create_tkinter_canvas(
+                self.trend_tab, trend_fig
+            )
+            trend_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+            # Create distribution charts
+            distribution_fig = self.visualizer.create_complexity_distribution_pie(results)
+            distribution_canvas = self.visualizer.create_tkinter_canvas(
+                self.distribution_tab, distribution_fig
+            )
+            distribution_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+        except Exception as e:
+            # If graph generation fails, show error
+            self._clear_tab(self.trend_tab)
+            error_label = tk.Label(self.trend_tab, 
+                                 text=f"Error generating trend graphs: {str(e)}", 
+                                 wraplength=400)
+            error_label.pack(expand=True)
+            
+    def _clear_tab(self, tab_frame):
+        """Clear all widgets from a tab frame."""
+        for widget in tab_frame.winfo_children():
+            widget.destroy()
         
     def _display_issues(self, issues: Dict[str, List[str]]):
         """Display issues in the issues tree."""
